@@ -1,0 +1,8 @@
+n 10000
+np 2
+nk 1000000
+nit 1
+rho .668d0
+rminz -.4
+rmaxz 1.0d0
+mp 10
