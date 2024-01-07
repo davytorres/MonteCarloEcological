@@ -1,10 +1,11 @@
+c     Copyright (c) 2007 Free Software Foundation, Inc.
       program correlation
       implicit none
       include 'mpif.h'
 
-      integer ss,nnnm1,ndnp
+      integer nnnm1,ndnp
       logical create_distribution
-      double precision varhyper,dzp,s,fac,ssz
+      double precision s,fac,ssz
       double precision rpairavg,rpair2avg,meanu
       double precision sstop,ssbot,expr2
       double precision hyp,dhyp
@@ -23,19 +24,18 @@ c     x- and y-coordinates of analytical distribution
       double precision analytical(m+1)
 c     Arrays and variables to build partition distribution
       double precision smid(num_intervals),fdist(num_intervals)      
-      double precision cdf(num_intervals),trap(num_intervals)
       integer num_processors,image,ierror
       
 c     Number of points in analytical distribution
-      integer nnn,ndim,mp,imultiple
+      integer nnn,mp,imultiple
       
       character*4 strz      
-      logical failed,partition
+      logical failed,nonreplacement
       
-      integer i,k,nk,iii,jjj,ii,nitr,iijj,iijja
-      integer n,nit,np,j,p,itimes,irs,ija
+      integer i,nk,iii,jjj,ii,nitr,iijj
+      integer n,np,j,itimes,irs,ija
       integer ij,jj,iiata,itimesnum
-      integer iiat,jjk,jjk_save,ijb
+      integer iiat,jjk,jjk_save
       integer maxindex,minindex,sumindex
       integer maxisum,minisum,minnp
       
@@ -43,20 +43,23 @@ c     Number of points in analytical distribution
       double precision expectation,var,zexp,zexprho
       double precision rminza,rmaxza,zminz,zmaxz
       double precision area1,area2,area,zvalue
-      double precision areadif,areadif_sum,areadifb_sum
+      double precision areadif
       double precision slopemin,slopemax
       double precision meanz,stz
       double precision xmsum,xms,ymsum,yms
-      double precision eps,rn,prob,dist_ks
-      double precision dist_ks_sum
+      double precision eps,rn,dist_ks
       double precision xmm,ymm
       double precision svarb2,svar
       double precision varr,var_slope
-      double precision varz,varz_sum,varz_a
+      double precision varz,varz_a
 c      double precision a(8),asum(8),
       double precision amax(10),amin(10)
       double precision a(10),aa(21),asum(21)
-      double precision sumintegral
+
+      double precision standard_dev_r
+      double precision standard_dev_rs
+      double precision standard_dev_s
+      double precision standard_dev_ss
       
 c     arrays to sample from standard normal distriution
       integer status
@@ -73,7 +76,7 @@ c     standard deviation of R average values
       double precision slopeavg2
       double precision ravg,zavg,slopeavg
       double precision varb2,sigma_slope,exp_slope
-      double precision rminz,rmaxz,r2
+      double precision rminz,rmaxz
 c     rho from bivariate distribution
       double precision rho
       double precision sumrs_error,sumss_error
@@ -82,15 +85,15 @@ c     rho from bivariate distribution
       double precision facnu,dbconv,sumb
 
       double precision zminzb,zmaxzb,dzrb
-      double precision fdistb,cumfdistb,cumareab
+      double precision cumfdistb,cumareab
       double precision areadifb
             
-      integer kja,niterations
-      double precision sigmar_sum,sigma_slope_sum
-      double precision sigma_slope_sum2,zavg_sum
-      double precision ravg_sum,slopeavg_sum
-      double precision sigmaz_sum,sigmaz_sum2
+      integer num_populations
+
 c      double precision slope_sd
+
+      double precision pi,facdist,facdist1,series,deriv,dr
+
       
       integer, allocatable :: npa(:)
 
@@ -134,16 +137,7 @@ c      double precision slope_sd
       double precision, allocatable :: slope_arrayd_min(:)
       double precision, allocatable :: sigma_slope_arrayd_min(:)            
       
-      double precision, allocatable :: rerror(:,:),rserror(:,:)
-      double precision, allocatable :: slopea(:,:),sslope(:,:)
-      double precision, allocatable :: rsum(:),rsum2(:)
-      double precision, allocatable :: rssum(:),rssum2(:)
-      double precision, allocatable :: slopesum(:),slopesum2(:)
-      double precision, allocatable :: sslopesum(:),sslopesum2(:)
-      double precision, allocatable :: standard_dev_r(:)
-      double precision, allocatable :: standard_dev_rs(:)
-      double precision, allocatable :: standard_dev_s(:)
-      double precision, allocatable :: standard_dev_ss(:)
+
          
       double precision, allocatable :: arrayr(:)
       double precision, allocatable :: arrayi(:,:)
@@ -168,67 +162,62 @@ c     standard deviation of x- and y-scores
       double precision, allocatable :: xavg(:),yavg(:)
       double precision, allocatable :: rs(:),zs(:)
 
-      double precision, allocatable :: xfull(:,:),yfull(:),solfull(:)
-      double precision, allocatable :: yhatfull(:)
-
       double precision, allocatable :: rsave(:),sdnorx(:),sdnory(:)
-      double precision, allocatable :: all(:),allp(:)
       
       call MPI_INIT(ierror)
       call MPI_COMM_SIZE(MPI_COMM_WORLD, num_processors, ierror)
       call MPI_COMM_RANK(MPI_COMM_WORLD, image, ierror)
 
       open(unit=9,file="input_swr")
+c     Output files that generated
       if (image .eq. 0) then
          open(unit=83,file="rnp")
          open(unit=84,file="snp")
          open(unit=85,file="re")
          open(unit=86,file="se")
-         open(unit=87,file="all")
-         open(unit=88,file="input_process")
          open(unit=96,file="rdistsim")
-         open(unit=97,file="rdista")
          open(unit=98,file="sdistsim")
+         open(unit=97,file="rdista")
          open(unit=99,file="sdista")
-         open(unit=107,file="bdist")
       end if
 
       print*,'image = ',image
 c     n: length of original scores
 c     np: size of the group
-c     nnn : sample size
-c     nk: number of iterations
-c     nit: number of samples
+c     nnn : sample size - now calculated
+c     nk: number of iterations to generate sampling distribution
+c     mp: number of different sample sizes used      
 
+c     Read input file "input_swr"      
       read(9,*) strz,n
       read(9,*) strz,np
       read(9,*) strz,nk
-      read(9,*) strz,nit
       read(9,*) strz,rho
       read(9,*) strz,rminz
       read(9,*) strz,rmaxz
       read(9,*) strz,mp
 
-      niterations = nit
-      itimes = 112/num_processors
+c     Currently 112 populations are used
+      num_populations = 112
+      itimes = num_populations/num_processors
 
       itimesnum = itimes*num_processors
-
       
-      allocate(all(itimes*4),allp(itimes*4*num_processors))
-      partition = .true.
+      nonreplacement = .true.
       create_distribution = .false.
       allocate(arrayr(-1000002:1000002))
       allocate(arrayi(-1000002:1000002,3))
 
       eps = 1.d-14
 
-      write(88,*) itimes
-      write(88,*) mp
-      write(88,*) num_processors
+      standard_dev_r = 0.d0
+      standard_dev_rs = 0.d0
+      standard_dev_s = 0.d0
+      standard_dev_ss = 0.d0
+
       
       if (image .eq. 0) then
-         print*,'n = ',n,'np = ',np,'nk = ',nk,'nit = ',nit,
+         print*,'n = ',n,'np = ',np,'nk = ',nk,
      &   'rho = ',rho,'rmin = ',rminz,'rmax = ',rmaxz,'mp = ',mp
       end if
 
@@ -270,38 +259,20 @@ c     nit: number of samples
       allocate(slope_array_min(mp),sigma_slope_array_min(mp))
       allocate(slope_arrayd_min(mp),sigma_slope_arrayd_min(mp))            
       
-      allocate(rerror(itimes*num_processors,mp))
-      allocate(rserror(itimes*num_processors,mp))
-      allocate(slopea(itimes*num_processors,mp))
-      allocate(sslope(itimes*num_processors,mp))
-      allocate(rsum(mp))
-      allocate(rsum2(mp))
-      allocate(rssum(mp))
-      allocate(rssum2(mp))
-      allocate(slopesum(mp))
-      allocate(slopesum2(mp))
-      allocate(sslopesum(mp))
-      allocate(sslopesum2(mp))
-      allocate(standard_dev_r(mp))
-      allocate(standard_dev_rs(mp))
-      allocate(standard_dev_s(mp))
-      allocate(standard_dev_ss(mp))
-      
-      ndim = 1
-      allocate(xfull(n,ndim),yfull(n),solfull(ndim),yhatfull(n))
-
       allocate(xm(n),ym(n))
       allocate(xma(n,itimes),yma(n,itimes))
 
       meanz = 0.d0
       stz = 1.d0
 
+c     Bivariate parameters      
       meannor = 0.d0
       sdnor = 1.d0
 
       meannor2 = 0.d0
       sdnor2 = 1.0d0
 
+c     These lines are executed so each image selects different populations      
       sumrr = 0.d0
       do ii = 1,image+20
          rr = rand()
@@ -309,14 +280,15 @@ c     nit: number of samples
       if (sumrr > 200.d0) then
          stop
       end if
-      
+
+c     Create itimes populations of size n on each image      
       do ii = 1,itimes
               
          diff = 1.d0
          nitdiff = 0
 
-c        Iterate until rho and R_individual agree to within .0005
-         do while (diff .gt. .01 .and. nitdiff .lt. 100000)
+c        Iterate until rho and R agree to within .0001
+         do while (diff .gt. .0001 .and. nitdiff .lt. 100000)
             nitdiff = nitdiff + 1
 
             xmsum = 0.d0
@@ -324,33 +296,26 @@ c        Iterate until rho and R_individual agree to within .0005
             ymsum = 0.d0
             yms = 0.d0
             do j = 1,n
-c              create a random number xm(i) sampled from a standard normal distribution      
+c              Create a random number between 0 and 1
                pnor = min(max(rand(),eps),1.d0-eps)
                qnor = 1.d0 - pnor
 
-c               xmm = pnor
-c               xm(j) = pnor
-c               call cdfnor(2,pnor,qnor,xmm,meanz,stz,
-c     &                     status,boundnor)
-               call cumbinomial(pnor,xmm)
+c              Sample x from a standard normal distribution               
+               call cdfnor(2,pnor,qnor,xmm,meanz,stz,
+     &                     status,boundnor)
                        
-c               xm(j) = sdnor*xmm + meannor
+               xm(j) = sdnor*xmm + meannor
 
-c               xmm = -log(1.d0 - pnor)
-               xm(j) = xmm
-            
                xmsum = xmsum + xm(j)
                xms = xms + xm(j)**2
 
                pnor = min(max(rand(),eps),1.d0-eps)
                qnor = 1.d0 - pnor
 
-c               ymm = -log(1.d0 - pnor)
-
+c              Sample y from a standard normal distribution               
                call cdfnor(2,pnor,qnor,ymm,meanz,stz,
      &                     status,boundnor)
-c               call cumbinomial(pnor,ymm)
-                       
+
 c              correlate xm(j) and ym(j) at level of correlation rho
 c              ym(j) = rho*xm(j) + dsqrt(1.d0 - rho**2)*ym(j)
 
@@ -362,35 +327,26 @@ c              ym(j) = rho*xm(j) + dsqrt(1.d0 - rho**2)*ym(j)
 
             end do
 
+c           Standard deviation of x            
             sdnort = dsqrt((xms - xmsum**2/dble(n))/dble(n))
+c           Standard deviation of y            
             sdnor2t = dsqrt((yms - ymsum**2/dble(n))/dble(n))
             
-            do i = 1,n
-               do p = 1,ndim
-                  xfull(i,p) = xm(i)
-               end do
-            end do
-
-            do i = 1,n
-               yfull(i) = ym(i)
-            end do
-
             do i = 1,n
                xma(i,ii) = xm(i)
                yma(i,ii) = ym(i)
             end do
 
-            call multiple(xfull,yfull,solfull,yhatfull,r2,n,ndim) 
-
+c           Compute the Pearson R coefficient of the sample            
             call pearsonr(r,slope,
      &                    xm,ym,n,sdx,sdy,yint,xbar,ybar)
 
-            diff = abs(r**2-rho**2)
-            diff = abs(r**2 - .7d0**2)
+            diff = abs(r-rho)
 
          end do
+c        Store the sample Pearson R value and standard deviation in the x- and y-variables
          rsave(ii) = r
-         print*,'rsave(',ii,') = ',rsave(ii),image
+
          sdnorx(ii) = sdnort
          sdnory(ii) = sdnor2t
          
@@ -401,23 +357,22 @@ c         rsave(ii) = rho
             stop
          end if
          
-c         print*,'rsave(ii) = ',ii,rsave(ii),rsave(ii)-rho,
-c     &   sdnorx(ii)-sdnor,sdnory(ii)-sdnor2
-
       end do
 
 
       imultiple = n/(mp*np)
+c     Create mp different sample sizes so the sample percent of populationranges between 0 and 100      
       do iijj = 1,mp
          npa(iijj) = imultiple*iijj
       end do
 
       allocate(rs(nk),slopeu(nk),zs(nk))      
       allocate(iia(np))
-      
-c     do iijj = 1,mp
+
+c     Loop over different sample sizes      
       do iijj = 1,mp
 
+c        nnn is the sample size         
          nnn = npa(iijj)
 
          if (image .eq. 0) then
@@ -475,25 +430,11 @@ c     do iijj = 1,mp
          slope_arrayd_min(iijj) = 1.d+15
          sigma_slope_arrayd_min(iijj) = 1.d+15
          
-
+c        Loop over all the populations on an image
          do ija = 1,itimes
-
-            varz_sum = 0.d0
-            sigmar_sum = 0.d0
-            sigmaz_sum = 0.d0
-            sigmaz_sum2 = 0.d0
-            sigma_slope_sum = 0.d0
-            ravg_sum = 0.d0
-            zavg_sum = 0.d0
-            slopeavg_sum = 0.d0
-            dist_ks_sum = 0.d0
-            areadif_sum = 0.d0
-            areadifb_sum = 0.d0
 
             arrayr = 3.d0
             arrayi = -1
-            
-            do kja = 1,niterations
             
             ravg = 0.d0
             zavg = 0.d0
@@ -506,10 +447,11 @@ c     do iijj = 1,mp
             rmaxza = -1.d+20
             slopemin = 1.d+20
             slopemax = -1.d+20
-         
+
+c           Select nk different samples from population for sampling distribution            
             do ij = 1,nk
 
-               if (partition) then
+               if (nonreplacement) then
                   indexs = index_save
                   jjk = 0
                   jjk_save = jjk
@@ -525,59 +467,35 @@ c     do iijj = 1,mp
                   minindex = 100000000
                   sumindex = 0
                   
-                  if (.not. partition) then
-c                    Choose nsamples of length nnn from vector                     
+                  if (.not. nonreplacement) then
+c                    Choose nsamples of length nnn with replacement                     
                      do i = 1,nnn
 
                         xavg(i) = 0.d0
                         yavg(i) = 0.d0
 
-c                        do ii = 1,np
-c
-c                           pnor = min(max(rand(),eps),1.d0-eps)
-c                           qnor = 1.d0 - pnor
-c
-c                           call cdfnor(2,pnor,qnor,xmm,meanz,stz,
-c     &                                 status,boundnor)
-c                       
-c                           pnor = min(max(rand(),eps),1.d0-eps)
-c                           qnor = 1.d0 - pnor
-c
-c                           call cdfnor(2,pnor,qnor,ymm,meanz,stz,
-c     &                                 status,boundnor)
-c
-c                           ymm =
-c     &                     sdnor2*(rho*xmm + dsqrt(1.d0-rho**2)*ymm)
-c     &                     + meannor2
-c
-c                           xavg(i) = xavg(i) + xmm
-c                           yavg(i) = yavg(i) + ymm
-c                        end do
+                        do ii = 1,np
+                           pnor = min(max(rand(),eps),1.d0-eps)         
+                           iii = pnor*dble(n)            
+                           iii = iii + 1
 
-
-                       do ii = 1,np
-                          pnor = min(max(rand(),eps),1.d0-eps)         
-                          iii = pnor*dble(n)            
-                          iii = iii + 1
-
-                          xavg(i) = xavg(i) + xma(iii,ija)
-                          yavg(i) = yavg(i) + yma(iii,ija)
-                       end do
+                           xavg(i) = xavg(i) + xma(iii,ija)
+                           yavg(i) = yavg(i) + yma(iii,ija)
+                        end do
 
                         xavg(i) = xavg(i)/dble(np)
                         yavg(i) = yavg(i)/dble(np)
 
                      end do
 
-
                   else
-c                    Choose nsamples of length nnn from vector
+c                    Choose nsamples of length nnn without replacement
                      do j = 1,nnn
 
                         maxisum = 0
                         minisum = 0
                         minnp = 100000000
-c                       Choose np random unique elements from vector
+c                       Choose np random unique elements from population (np is the group size)
                         do jj = 1,np
                      
                            rrr = rand()
@@ -616,10 +534,12 @@ c                       Choose np random unique elements from vector
                      
                   end if
 
+c                 rs(ij) and slopeu(ij) are the Pearson R coefficient and slope of the sample                  
                   call pearsonr(rs(ij),slopeu(ij),
      &                 xavg,yavg,nnn,sdx,sdy,yint,xbar,ybar)
-                  
-                  if (partition) then
+
+c                 Make sure the choice of the sample is unique                  
+                  if (nonreplacement) then
                      irs = 1000000*rs(ij)
             
                      if (arrayr(irs) .lt. 2.d0) then
@@ -653,13 +573,14 @@ c                              print*,'rs = ',rs(ij),arrayr(irs)
                   stop
                end if
          
-               if (partition) then
+               if (nonreplacement) then
                   arrayr(irs) = rs(ij)
                   arrayi(irs,1) = maxindex
                   arrayi(irs,2) = minindex
                   arrayi(irs,3) = sumindex
                end if
 
+c              Calculate the Fisher transformed R value 
                zs(ij) = .5d0*log((1.d0 + rs(ij))/(1.d0 - rs(ij)))
                
                ravg = ravg + rs(ij)
@@ -677,10 +598,7 @@ c                              print*,'rs = ',rs(ij),arrayr(irs)
 c           nk loop    
             end do
 
-c            if (image .eq. 0) then
-c               print*,'nitr itimes = ',nitr,ija
-c            end if
-            
+c           Compute standard deviations of Pearson R, Z, and slope for the sample distribution            
             sigmar =
      &      dsqrt( (rpairsum2 - ravg**2/dble(nk))/dble(nk) )
             sigmaz =
@@ -688,9 +606,7 @@ c            end if
             sigma_slope =
      &      dsqrt((slopeavg2 - slopeavg**2/dble(nk))/dble(nk))
 
-c            sigmar = sigmar**2
-c            sigma_slope = sigma_slope**2
-
+c           Compute variances            
             varr = sigmar**2
             var_slope = sigma_slope**2
             varz = sigmaz**2
@@ -701,11 +617,15 @@ c           average of r average scores
 c           average of z scores
             zavg = zavg/dble(nk)
 
+c           average of slope scores            
+            slopeavg = slopeavg/dble(nk)            
+
+c           Compute the area difference from a normal distribution            
             zminz = -3.5d0
             zmaxz =  3.5d0
 
             dzr = (zmaxz-zminz)/dble(num_intervals)
-
+            
             fdist = 0.d0
             cumfdist = 0.d0
             cumarea = 0.d0
@@ -733,6 +653,9 @@ c           Use num_intervals intervals
                areadif = areadif + abs(fdist(i)/dble(nk)-area)
             end do
 
+
+c           Find area difference between sample and analytical b distribution
+c           The variance is adjusted to account for the sample percent of the population      
             ii = 2
             fac = 1.d0
 
@@ -767,28 +690,6 @@ c            nu = dble(nnnm1s)
 
             dbconv = dsqrt(nu)*sdnorx(ija)/(bot*sdnory(ija))
 
-c            sumintegral = 0.d0
-c            do i = 1,num_intervals
-c               sminz = slopemin + dble(i-1)*dz
-c               smaxz = slopemin + dble(i)*dz
-c               smid(i) = .5d0*(sminz+smaxz)
-c               top = (smid(i)*sdnorx(ija)/sdnory(ija) - rsave(ija))
-c               fgnu = top*dsqrt(nu)/bot
-c               v = dbconv*facgnu*(1.d0 + fgnu**2/nu)**expgnu
-c
-c               sumintegral = sumintegral + v*dz
-c               call hypser(0.5d0,(nu+1.d0)/2.d0,1.5d0,-fgnu**2/nu,
-c     &                     hyp,dhyp)
-c               trap(i) = sumintegral
-c               cdf(i) = .5d0 + fgnu*facgnu*hyp
-cc               v = facgnu*(1.d0 + smid(i)**2/dsqrt(nu))**expgnu
-c               write(107,*) smid(i),v
-c            end do
-c            do i = 1,num_intervals
-c               write(108,*) smid(i),trap(i),cdf(i)
-c            end do
-
-            
             zminzb = slopemin
             zmaxzb = slopemax
 
@@ -826,78 +727,46 @@ c           Use num_intervals intervals
                end do
                areadifb = areadifb + abs(fdist(i)/dble(nk)-area)
             end do
-c            print*,'cumareab cumfdistb areadifb = ',
-c     &      cumareab,cumfdistb/dble(nk),areadifb
-            
-            call ksone(zs,nk,dist_ks,prob,zavg,sigmaz)
-            
-            slopeavg = slopeavg/dble(nk)
-            
-            sigmar_sum = sigmar_sum + varr
-            sigmaz_sum = sigmaz_sum + sigmaz
-            varz_sum = varz_sum + varz
-            sigma_slope_sum = sigma_slope_sum + var_slope
-            ravg_sum = ravg_sum + ravg
-            zavg_sum = zavg_sum + zavg
-            slopeavg_sum = slopeavg_sum + slopeavg
-            dist_ks_sum = dist_ks_sum + dist_ks
-            areadif_sum = areadif_sum + areadif
-            areadifb_sum = areadifb_sum + areadifb
-            
-            end do
 
-            varr = sigmar_sum/dble(niterations)
-            sigmaz = sigmaz_sum/dble(niterations)
-            varz = varz_sum/dble(niterations)
-            var_slope = sigma_slope_sum/dble(niterations)
-            ravg = ravg_sum/dble(niterations)
-            zavg = zavg_sum/dble(niterations)
-            slopeavg = slopeavg_sum/dble(niterations)
-            dist_ks = dist_ks_sum/dble(niterations)
-            areadif = areadif_sum/dble(niterations)
-            areadifb = areadifb_sum/dble(niterations)
+c           The Kolmogorov-Smirnov test is currently not used
+            dist_ks = 0.d0
+c            call ksone(zs,nk,dist_ks,prob,zavg,sigmaz)
             
+
+c           Analytical expectation of analytical slope distribution            
             exp_slope = rsave(ija)*sdnory(ija)/sdnorx(ija)            
-            
+
+c           Variance of analytical slope distribution            
             varb2 = (1.d0 - rsave(ija)**2)/(dble(nnn) - 3.d0)
 c            varb2 = varb2*sdnor2**2/sdnor**2
             varb2 = varb2*sdnory(ija)**2/sdnorx(ija)**2            
-            
-c            call mct(nnn,rsave(ija),
-c     &           sdnor,sdnor2,expectation,var)
 
+c           Calculate expectation (expectation) and  variance (var)
+c           of analytical Pearson R distribution
             call mct(nnn,rsave(ija),
      &      sdnorx(ija),sdnory(ija),expectation,var)            
 
-
+c           Mean of Fisher distribution
             zexp = .5d0*log((1.d0+expectation)/(1.d0-expectation))
             zexprho = .5d0*log((1.d0+rsave(ija))/(1.d0-rsave(ija)))
-c            svarb2 = sqrt(varb2)
-c            svar = sqrt(var)
-
-            svarb2 = varb2
-            svar = var
+c           Variance of Fisher distribution
             varz_a = 1.d0/dble(nnn-3) 
 
-            all(1 + 4*(ija-1)) = (ravg - expectation)/expectation
-            all(2 + 4*(ija-1)) = (varr - svar)/svar
-            all(3 + 4*(ija-1)) = (slopeavg - exp_slope)/exp_slope
-            all(4 + 4*(ija-1)) = (var_slope - svarb2)/svarb2
-c            all(5 + 6*(ija-1)) = (zavg - zexp)/zexp
-c            all(6 + 6*(ija-1)) = sigmaz_sd
+            
+            svarb2 = varb2
+            svar = var
 
+c           Sum each metric for each population
+            
             d_array(iijj) = d_array(iijj) + dist_ks
             area_array(iijj) = area_array(iijj) + areadif
             areab_array(iijj) = areab_array(iijj) + areadifb            
-c            z_array(iijj) = z_array(iijj) + (zavg - zexp)/zexp
-c            zrho_array(iijj) = z_array(iijj) + (zavg - zexprho)/zexprho
             z_array(iijj) = z_array(iijj) + (zavg - zexp)
             zrho_array(iijj) = z_array(iijj) + (zavg - zexprho)
             
             varz_array(iijj) = varz_array(iijj) + (varz - varz_a)/varz_a
 c            varz_array(iijj) = varz_array(iijj) + varz            
             zq_array(iijj) = zq_array(iijj) + varz
-c           (zavg - zexp)/zexp
 
             slope_array_abs(iijj) = slope_array_abs(iijj) +
      &      abs(slopeavg-exp_slope)
@@ -927,7 +796,6 @@ c           (zavg - zexp)/zexp
             sigma_slope_arrayd(iijj) = sigma_slope_arrayd(iijj) +
      &      ((var_slope-svarb2)/svarb2)            
 
-
             
             ravg_array_abs(iijj) = ravg_array_abs(iijj) +
      &      abs(ravg-expectation)
@@ -944,7 +812,6 @@ c           (zavg - zexp)/zexp
             ravg_array_value(iijj) = ravg_array_value(iijj) +
      &      ravg                        
             
-
 
             ravg_array(iijj) = ravg_array(iijj) +
      &      abs((ravg-expectation)/expectation)
@@ -1037,8 +904,6 @@ c        itimes loop
          slope_array_dif(iijj) = slope_array_dif(iijj)/dble(itimes)
          slope_array_value(iijj) = slope_array_value(iijj)/dble(itimes)
             
-
-         
          
          aa(1) = ravg_array(iijj)
          aa(2) = sigmar_array(iijj)
@@ -1054,7 +919,6 @@ c        itimes loop
          aa(12) = zrho_array(iijj)
          aa(13) = varz_array(iijj)
          aa(14) = zq_array(iijj)
-         
          aa(15) = ravg_array_abs(iijj)
          aa(16) = ravg_array_dif(iijj)
          aa(17) = ravg_array_value(iijj)
@@ -1094,69 +958,8 @@ c        itimes loop
 
          call MPI_REDUCE(a,amin,10,MPI_DOUBLE_PRECISION,
      &                   MPI_MIN,0,MPI_COMM_WORLD,ierror)         
-         
-         call MPI_GATHER(all,itimes*4,MPI_DOUBLE_PRECISION,allp,
-     &   itimes*4,MPI_DOUBLE_PRECISION,0,MPI_COMM_WORLD,ierror)
 
          if (image .eq. 0) then
-            write(87,*) npa(iijj),dble(np*npa(iijj))/dble(n)
-            do iijja = 1,num_processors*itimes*4
-               write(87,*) allp(iijja)
-            end do
-
-            rsum(iijj) = 0.d0
-            rsum2(iijj) = 0.d0
-            rssum(iijj) = 0.d0
-            rssum2(iijj) = 0.d0
-            slopesum(iijj) = 0.d0
-            slopesum2(iijj) = 0.d0
-            sslopesum(iijj) = 0.d0
-            sslopesum2(iijj) = 0.d0
-         
-            ij = 0
-            ija = 0
-            do k = 1,num_processors
-               do i = 1,itimes
-                  ija = ija + 1
-                  ij = ij + 1
-                  rerror(ija,iijj) = allp(ij)
-                  ij = ij + 1
-                  rserror(ija,iijj) = allp(ij)
-                  ij = ij + 1
-                  slopea(ija,iijj) = allp(ij)
-                  ij = ij + 1
-                  sslope(ija,iijj) = allp(ij)
-
-                  rsum(iijj) = rsum(iijj) + rerror(ija,iijj)
-                  rsum2(iijj) = rsum2(iijj) + rerror(ija,iijj)**2
-                  rssum(iijj) = rssum(iijj) + rserror(ija,iijj)
-                  rssum2(iijj) = rssum2(iijj) + rserror(ija,iijj)**2
-                  slopesum(iijj) = slopesum(iijj) + slopea(ija,iijj)
-                  slopesum2(iijj) = slopesum2(iijj)+ slopea(ija,iijj)**2
-                  sslopesum(iijj) = sslopesum(iijj) + sslope(ija,iijj)
-                  sslopesum2(iijj)=sslopesum2(iijj)+ sslope(ija,iijj)**2
-               end do
-            end do
-            
-            standard_dev_r(iijj) =
-     &      rsum2(iijj) - rsum(iijj)**2/dble(itimesnum)
-            standard_dev_r(iijj) =
-     &      dsqrt(standard_dev_r(iijj)/dble(itimesnum))
-
-            standard_dev_rs(iijj) =
-     &      rssum2(iijj) - rssum(iijj)**2/dble(itimesnum)
-            standard_dev_rs(iijj)=
-     &      dsqrt(standard_dev_rs(iijj)/dble(itimesnum))
-
-            standard_dev_s(iijj) =
-     &      slopesum2(iijj) - slopesum(iijj)**2/dble(itimesnum)
-            standard_dev_s(iijj) =
-     &      dsqrt(standard_dev_s(iijj)/dble(itimesnum))
-
-            standard_dev_ss(iijj) =
-     &      sslopesum2(iijj) - sslopesum(iijj)**2/dble(itimesnum)
-            standard_dev_ss(iijj) =
-     &      dsqrt(standard_dev_ss(iijj)/dble(itimesnum))
          
             do i = 1,21
                asum(i) = asum(i)/dble(num_processors)
@@ -1176,7 +979,6 @@ c        itimes loop
             zrho_array(iijj) = asum(12)
             varz_array(iijj) = asum(13)
             zq_array(iijj) = asum(14)
-
             ravg_array_abs(iijj) = asum(15)
             ravg_array_dif(iijj) = asum(16)
             ravg_array_value(iijj) = asum(17)
@@ -1209,10 +1011,8 @@ c        itimes loop
 
             
          end if
-         
-c         deallocate(iia)
+
          deallocate(xavg,yavg)
-c         deallocate(rs,zs,slopeu)
       
 c     mp loop      
       end do
@@ -1228,11 +1028,7 @@ c     mp loop
             sumrs_error = sumrs_error + sigmar_array(iijj)
             sums_error = sums_error + sigmar_array(iijj)
             sumss_error = sumss_error + sigma_slope_array(iijj)
-c         write(83,*) dble(np*npa(iijj))/dble(n),
-c     &        ravg_array(iijj),sigmar_array(iijj),
-c     &        ravg_arrayd(iijj),sigmar_arrayd(iijj)
-c         write(84,*) dble(np*npa(iijj))/dble(n),
-c     &        slope_array(iijj),sigma_slope_array(iijj)
+
             write(83,*) npa(iijj),
      &           ravg_array(iijj),sigmar_array(iijj),
      &           ravg_arrayd(iijj),sigmar_arrayd(iijj),
@@ -1240,7 +1036,7 @@ c     &        slope_array(iijj),sigma_slope_array(iijj)
      &           ravg_array_min(iijj),sigmar_array_min(iijj),                        
      &           ravg_arrayd_max(iijj),sigmar_arrayd_max(iijj),
      &           ravg_arrayd_min(iijj),sigmar_arrayd_min(iijj),
-     &           standard_dev_r(iijj),standard_dev_rs(iijj),
+     &           standard_dev_r,standard_dev_rs,
      &           d_array(iijj),area_array(iijj),z_array(iijj),
      &           zrho_array(iijj),varz_array(iijj),zq_array(iijj)
             write(84,*) npa(iijj),
@@ -1250,7 +1046,7 @@ c     &        slope_array(iijj),sigma_slope_array(iijj)
      &           slope_array_min(iijj),sigma_slope_array_min(iijj),                        
      &           slope_arrayd_max(iijj),sigma_slope_arrayd_max(iijj),
      &           slope_arrayd_min(iijj),sigma_slope_arrayd_min(iijj),
-     &           standard_dev_s(iijj),standard_dev_ss(iijj)
+     &           standard_dev_s,standard_dev_ss
             write(85,*) dble(np*npa(iijj))/dble(n),
      &           ravg_array(iijj),sigmar_array(iijj),
      &           ravg_arrayd(iijj),sigmar_arrayd(iijj),
@@ -1258,7 +1054,7 @@ c     &        slope_array(iijj),sigma_slope_array(iijj)
      &           ravg_array_min(iijj),sigmar_array_min(iijj),                        
      &           ravg_arrayd_max(iijj),sigmar_arrayd_max(iijj),
      &           ravg_arrayd_min(iijj),sigmar_arrayd_min(iijj),
-     &           standard_dev_r(iijj),standard_dev_rs(iijj),
+     &           standard_dev_r,standard_dev_rs,
      &           d_array(iijj),area_array(iijj),z_array(iijj),
      &           zrho_array(iijj),varz_array(iijj),zq_array(iijj),
      &           ravg_array_abs(iijj),ravg_array_abs_max(iijj),
@@ -1271,7 +1067,7 @@ c     &        slope_array(iijj),sigma_slope_array(iijj)
      &           slope_array_min(iijj),sigma_slope_array_min(iijj),                        
      &           slope_arrayd_max(iijj),sigma_slope_arrayd_max(iijj),
      &           slope_arrayd_min(iijj),sigma_slope_arrayd_min(iijj),
-     &           standard_dev_s(iijj),standard_dev_ss(iijj),
+     &           standard_dev_s,standard_dev_ss,
      &           slope_array_abs(iijj),slope_array_abs_max(iijj),
      &           slope_array_abs_min(iijj),slope_array_dif(iijj),
      &           slope_array_value(iijj),areab_array(iijj)            
@@ -1285,6 +1081,7 @@ c     &        slope_array(iijj),sigma_slope_array(iijj)
          if (create_distribution) then
             dzr = (rmaxz - rminz)/dble(num_intervals)
 
+c           Sample distribution of simulated Pearson R            
             fdist = 0.d0
             cumfdist = 0.d0
             sumdist = 0.d0
@@ -1305,10 +1102,9 @@ c           Use num_intervals intervals
      &                     fdist(i),dble(nk)
             end do
 
+c           Sample distribution of linear regression slope            
             slopemax = slopeavg + 3.5d0*sigma_slope
             slopemin = slopeavg - 3.5d0*sigma_slope
-            slopemin = .65d0
-            slopemax = 1.15d0
             
             dz = (slopemax - slopemin)/dble(num_intervals)
 
@@ -1332,39 +1128,43 @@ c           Use num_intervals intervals
      &                     fdist(i),dble(nk)
             end do
 
-c           Create analytical distribution based on general hypergeometric function
-            print*,'rho analytical = ',rho
-            print*,'start rdistribution'
-            ss = nnn
-            call rdistribution(rho,ss,varhyper,ra,analytical,m)
-            print*,'end rdistribution'
-      
+c           Analytical distribution of Pearson R
+            pi = acos(-1.d0)
+            facdist = 1.d0
+            do i = nnn-2,1,-1
+               facdist = facdist*dble(i)/(dble(i)+.5d0)
+            end do
+            facdist = facdist/(.5d0*dsqrt(pi))
+            facdist = facdist*dble(nnn-2)/dsqrt(2.d0*pi)
+            facdist1 = facdist*(1.d0 - rho**2)**(dble(nnn-1)/2.d0)
+            dr = 1.999d0/dble(m)
             rpairavg = 0.d0
             rpair2avg = 0.d0
-            dzp = 1.999d0/dble(m)
             do i = 1,m+1
-               if (ra(i) .ge. rminz .and. ra(i) .le. rmaxz) then
+               ra(i) = -1.d0 + dr*dble(i-1) + 1.d-8
+               facdist = facdist1*(1.d0 - rho*ra(i))**(-dble(nnn)+1.5d0)
+               facdist =facdist*(1.d0 - ra(i)**2)**(dble(nnn)/2.d0-2.d0)
+               call hypser(0.5d0,0.5d0,dble(nnn)-0.5d0,
+     &                     0.5d0*(1.d0+rho*ra(i)),series,deriv)
+               analytical(i) = facdist*series
+               if (ra(i) .gt. rminz .and. ra(i) .lt. rmaxz) then
                   write(97,*) ra(i),analytical(i)
                end if
                rpairavg = rpairavg + ra(i)*analytical(i)
                rpair2avg = rpair2avg + (ra(i)**2)*analytical(i)
             end do
-            meanu = rpairavg*dzp
-
-            print*,'mean analytical r = ',meanu
-            rpair2avg = rpair2avg*dzp
+            meanu = rpairavg*dr
+            rpair2avg = rpair2avg*dr
             sigmau = dsqrt(rpair2avg - meanu**2)
-            print*,'standard dev analytical r = ',sigmau**2
-            print*,'rpairavg = ',rho-meanu
+
 
             ndnp = n/np
-            print*,rho - rho*(1.d0 - rho**2)/(2.d0*dble(ndnp-1))
+c            print*,rho - rho*(1.d0 - rho**2)/(2.d0*dble(ndnp-1))
 
-
+c           Analytical distribution of linear regression slope
             ii = 2
             fac = 1.d0
 
-c            nnn = 30
             s = dble(nnn)
             ssz = s/2.d0
 
@@ -1383,7 +1183,6 @@ c            nnn = 30
 
             fac = fac*((1.d0-rho**2)**((s-1.d0)/2.d0))
             fac = fac/sqrt(acos(-1.d0))
-c            fac = fac*sdnor/sdnor2
 
             expectation = expectation*rho
 
@@ -1396,86 +1195,27 @@ c            fac = fac*sdnor/sdnor2
 
             var = expr2 - expectation**2
       
-            print*,'expectation var = ',expectation,var
-
             ija = 1
             sdnorx(1) = 1.d0
-            sdnory(1) = 1.3d0
+            sdnory(1) = 1.d0
 
             sumb = 0.d0
             do i = 1,num_intervals
                sminz = slopemin + dble(i-1)*dz
                smaxz = slopemin + dble(i)*dz
                smid(i) = .5d0*(sminz+smaxz)
-c               v = fac*(1.d0 - rho**2 + (rho -
-c     &              (sdnor/sdnor2)*smid(i))**2)**(-s/2.d0)
-
                v = fac*(1.d0 - rho**2 + (rho -
      &              (sdnorx(ija)/sdnory(ija))*smid(i))**2)**(-s/2.d0)
                v = v*sdnorx(1)/sdnory(1)
-c               v = fac*(1.d0 - rho**2 + (rho -
-c     &         (1.d0/1.d0)*smid(i))**2)**(-s/2.d0)                              
                write(99,*) smid(i),v
                sumb = sumb + v*dz
             end do
-            print*,'sumb = ',sumb
-c            stop
-
-
-            
-            nu = dble(nnnm1)
-            facgnu = facnu/dsqrt(nu*acos(-1.d0))
-            expgnu = -(nu + 1.d0)/2.d0
-c           print*,'sigma = ',sdnorx(ija),sdnory(ija),rsave(ija)
-c            print*,'ratio = ',sdnorx(ija)/sdnory(ija)
-c            sdnorx(1) = 1.d0
-c            sdnory(1) = 1.d0
-
-c            slopemin = -1.d0
-c            dz = 2.d0/dble(num_intervals)
-            bot = dsqrt(1.d0 - rsave(ija)**2)
-
-c            print*,'sdn = ',sdnory(ija),sdnorx(ija)
-            dbconv = dsqrt(nu)*sdnorx(ija)/(bot*sdnory(ija))
-c            dbconv = dsqrt(nu)/bot
-c            dbconv = 0.5d0*dsqrt(nu)*sdnory(ija)/(bot*sdnorx(ija))
-
-            sumintegral = 0.d0
-            do i = 1,num_intervals
-               sminz = slopemin + dble(i-1)*dz
-               smaxz = slopemin + dble(i)*dz
-               smid(i) = .5d0*(sminz+smaxz)
-               top = (smid(i)*sdnorx(ija)/sdnory(ija) - rsave(ija))
-c               top = (smid(i)*1.d0/1.d0 - rsave(ija))
-               
-               fgnu = top*dsqrt(nu)/bot
-c               print*,'fgnu = ',facgnu,fgnu,
-c     &         (1.d0 + fgnu**2/dsqrt(nu))**expgnu
-               v = dbconv*facgnu*(1.d0 + fgnu**2/nu)**expgnu
-
-               sumintegral = sumintegral + v*dz
-               call hypser(0.5d0,(nu+1.d0)/2.d0,1.5d0,-fgnu**2/nu,
-     &                     hyp,dhyp)
-               trap(i) = sumintegral
-               cdf(i) = .5d0 + fgnu*facgnu*hyp
-c               v = facgnu*(1.d0 + smid(i)**2/dsqrt(nu))**expgnu
-               write(107,*) smid(i),v
-            end do
-            do i = 1,num_intervals
-               write(108,*) smid(i),trap(i),cdf(i)
-            end do
-            
-            
-
-            
 
          end if   
       
       end if
 
       call MPI_FINALIZE(ierror)         
-
-      
 
       end
 
@@ -1544,7 +1284,6 @@ c     For cabs(z) ? 1/2 convergence is quite rapid.
          fac=((aa*bb)/cc)*fac
          deriv=deriv+fac
          fac=fac*z/n
-c         print*,'fac = ',fac                                                    \
                                                                                   
          series=temp+fac
          if (series.eq.temp) return
@@ -1602,13 +1341,10 @@ c     Local variables
 
       ybar = sumy*rn
       xbar = sumx*rn
-c      print*,'xbar ybar = ',xbar,ybar
 
       rtop = sumxy - sumx*sumy/n
       sigmax = sumx2 - rn*(sumx**2)
       sigmay = sumy2 - rn*(sumy**2)
-
-c      print*,'sigmax sigmay = ',sigmax,sigmay
       
       rbot = dsqrt(sigmax*sigmay)
 
@@ -1617,708 +1353,13 @@ c      print*,'sigmax sigmay = ',sigmax,sigmay
       sdx = dsqrt(sigmax*rn)
       sdy = dsqrt(sigmay*rn)
 
-c      print*,'sdx sdy = ',sdx,sdy
-
-c      print*,'sigmay sigmax = ',sigmay,sigmax
-
-c      print*,'r = ',r
-
-c      print*,'sqrt = ',dsqrt(sigmay/sigmax)
-      
       slope = r*dsqrt(sigmay/sigmax)
-
-c      print*,'slope = ',slope
 
       yint = ybar - slope*xbar
 
-c      print*,'slope yint = ',slope,yint
 
       return
       end
-
-      subroutine aggreg(p,n,m,ndm,newpairs)
-c     aggreg creates a partition given n original scores
-      implicit none
-
-c     Inputs
-c     Number of groups
-      integer ndm
-c     Number of original scores
-      integer n
-c     Size of the groups
-      integer m
-
-c     Outputs
-c     p(i,j) stores the original score index in element j of group i
-      integer p(ndm,m)
-c     pairs(i) stores the group the original index i is stored in
-      integer pairs(n)
-
-c     Local variables
-      logical found,assigned(ndm)
-      integer k,irn,kk,ij,i,j
-      integer igroup,igroup_count
-      integer map(n),newpairs(n)
-      double precision r,eps
-
-
-      eps = 1.d-14
-
-      do i = 1,n
-         map(i) = i
-      end do
-
-      p = 0
-
-c     Index i refers to the group number
-      do i = 1,ndm
-
-         j = 0
-         do while (j .lt. m) 
-
-c           Create a random number (irn) from 1 to n - (i-1)*m
-            r = rand(0)
-            r = max(eps,r)
-            r = min(r,1.d0-eps)
-            irn = r*dble(n - (i-1)*m)
-            irn = irn + 1
-
-
-c           Ensure no duplicate members in group i
-            found = .false.
-            if (j .gt. 0) then
-               do k = 1,j
-                  if (p(i,k) .eq. map(irn)) then
-                     found = .true.
-                  end if
-               end do
-            end if
-
-            if (.not. found) then
-               j = j + 1
-               p(i,j) = map(irn)
-               pairs(p(i,j)) = i
-            end if
-
-         end do
-
-         ij = 0
-
-c        Collect all indices that have not been selected in array map
-         do k = 1,n
-
-            found = .false.
-            do j = 1,i
-               do kk = 1,m
-                  if (k .eq. p(j,kk)) then
-                     found = .true.
-                  end if
-               end do
-            end do
-
-            if (.not. found) then
-               ij = ij + 1
-               map(ij) = k
-            end if
-
-         end do
-
-      end do
-
-c     Reorder group assignments
-      igroup_count = 0
-
-      do k = 1,ndm
-         assigned(k) = .false.
-      end do
-
-      do k = 1,n
-         igroup = pairs(k)
-         if (.not. assigned(igroup)) then
-            assigned(igroup) = .true.
-            igroup_count = igroup_count + 1
-            do j = 1,n
-               if (pairs(j) .eq. igroup) then
-                  newpairs(j) = igroup_count
-               end if
-            end do
-         end if
-      end do
-
-      end
-
-      subroutine rdistribution(rho,ss,varhyper,ra,analytical,m)
-      implicit none
-      integer ss,n,nterms,k,i,m,ijk
-      integer irn,irn32,ijka
-      double precision daa,daa32,top2a,top3a
-      double precision aa,bb,er,er32
-      double precision ric,rick,prod
-      double precision fachg,fachgk,factop2,factop3
-      double precision rn,r,rho
-      double precision coef,sum,sumr,pi,dr
-      double precision fac3,addition
-      double precision nsum,rsum,rsum2
-      double precision varhyper
-      double precision ff(m+1),ra(m+1)
-      double precision analytical(m+1)
-
-      pi = acos(-1.d0)
-
-
-      n = ss - 1
-      rn = dble(n)
-
-      dr = 1.999d0/dble(m)
-      nsum = 0.d0
-      rsum = 0.d0
-      rsum2 = 0.d0
-
-      aa = 1.d0 - rho**2
-
-      er = rn/2.d0
-      er32 = (rn - 3.d0)/2.d0
-
-      irn = er
-      irn32 = er32
-
-      daa = er - dble(irn)
-      daa32 = er32 - dble(irn32)
-
-      top2a = aa**daa
-
-      do i = 1,m+1
-
-         r = -1.d0 + dr*dble(i-1) + 1.d-8
-
-         bb = 1.d0 - r**2
-         top3a = bb**daa32
-         coef = top2a*top3a/pi
-
-         sum = 0.d0
-         addition = 1.d0
-         nterms = 0
-         k = 0
-
-         do while ((abs(addition) .gt. 1.d-14
-     &              .and. nterms .lt. 1000) .or.
-     &             nterms .lt. 200)
-
-            ric = dble(n+k)/2.d0
-            rick = dble(k+1)
-            prod = 1.d0
-            ijka = 1
-            do ijk = n-2,1,-1
-
-               if (ijka .le. irn) then
-                  factop2 = aa
-               else
-                  factop2 = 1.d0
-               end if
-
-               if (ijka .le. irn32) then
-                  factop3 = bb
-               else
-                  factop3 = 1.d0
-               end if
-
-               ijka = ijka + 1
-
-               ric = ric - 1.d0
-               if (ric .gt. 1.1d0) then
-                  fachg = ric
-               else
-                  if (dabs(ric-.5d0) .lt. 1.d-12) then
-                     fachg = .5d0*dsqrt(pi)
-                  else
-                     fachg = 1.d0
-                  end if
-               end if
-
-               rick = rick - 1.d0
-               if (rick .gt. 1.1d0) then
-                  fachgk = rick
-               else
-                  fachgk = 1.d0
-               end if
-
-               prod = prod*fachg*fachg*2.d0/(fachgk*dble(ijk))
-               prod = prod*factop2*factop3
-
-            end do
-
-            do while (ric .gt. 1.1d0 .or. rick .gt. 1.1d0)
-               ric = ric - 1.d0
-               if (ric .gt. 1.1d0) then
-                  fachg = ric
-               else
-                  if (dabs(ric-.5d0) .lt. 1.d-12) then
-                     fachg = .5d0*dsqrt(pi)
-                  else
-                     fachg = 1.d0
-                  end if
-               end if
-
-               rick = rick - 1.d0
-               if (rick .gt. 1.1d0) then
-                  fachgk = rick
-               else
-                  fachgk = 1.d0
-               end if
-               prod = prod*fachg*fachg/fachgk
-
-            end do
-
-            fac3 = (2.d0*r*rho)**k
-            addition = coef*fac3*prod
-
-            nterms = nterms + 1
-            sum = sum + addition
-
-            k = k + 1
-         end do
-
-         ra(i) = r
-         ff(i) = sum
-
-         rsum = rsum + r*sum
-         rsum2 = rsum2 + (r**2)*sum
-         nsum = nsum + sum
-      end do
-
-      sumr = 0.d0
-      do i = 1,m
-         sumr = sumr + .5d0*dr*(ff(i)+ff(i+1))
-      end do
-
-      varhyper = ( rsum2 - rsum**2/nsum )/(nsum - 1.d0)
-
-      do i = 1,m+1
-         analytical(i) = ff(i)/sumr
-      end do
-
-c      print*,'sumr = ',sumr
-c      print*,'nsum = ',nsum
-c      print*,'varhyper = ',varhyper
-
-      end
-      
-      subroutine sorte(a,n)
-      integer n,a(n)
-      integer i,j,amin,atemp
-
-      do i = 1,n-1
-         amin = a(i)
-         jmin = 0
-         do j = i+1,n
-            if (a(j) .lt. amin) then
-               jmin = j
-               amin = a(j)
-            end if
-         end do
-c         print*,'jmin amin = ',jmin,amin,i
-         if (jmin .gt. 0) then
-            atemp = a(i)
-            a(i) = a(jmin)
-            a(jmin) = atemp
-         end if
-c         do j = 1,n
-c            print*,'a(',j,') = ',a(j)
-c         end do
-      end do
-
-      return
-      end
-
-      
-      subroutine freqdist(x,y,n,ymin,dy,freq)
-      implicit none
-      integer i,n,ii
-      double precision ymin,ymax,dy
-      double precision x(n),y(n)
-      double precision freq(10),sumfreq
-         
-      ymin = 1.d+10
-      ymax = -1.d+10
-      do i = 1,n
-         if (x(i) .ge.-.1d0 .and.
-     &       x(i) .le. .1d0) then
-            ymin = min(ymin,y(i))
-            ymax = max(ymax,y(i))
-         end if
-      end do
-
-      dy = (ymax - ymin)/10.d0
-
-      freq = 0.d0
-      do ii = 1,n
-         do i = 1,10
-            if (x(ii) .gt. -.1d0 .and.
-     &          x(ii) .le. .1d0) then
-               if (y(ii) .gt. ymin + dble(i-1)*dy .and.
-     &             y(ii) .le. ymin + dble(i)*dy) then
-                  freq(i) = freq(i) + 1.d0
-               end if
-            end if
-         end do
-      end do
-
-      sumfreq = 0.d0
-      do i = 1,10
-         sumfreq = sumfreq + freq(i)
-      end do
-
-      do i = 1,10
-         freq(i) = freq(i)/sumfreq
-      end do
-
-         
-      return
-      end
-
-      
-      subroutine permutation(p,n)
-      implicit none
-      logical alreadyused
-      integer int50,is1,is2
-      integer p(n),n,n2,i,j
-      double precision eps,pv
-
-      n2 = n/2
-      eps = 1.d-10
-
-      is1 = 0
-      do while (is1 .lt. n2)
-         pv = max(min(rand(),1.d0-eps),eps)
-         int50 = dble(n)*pv+1
-         alreadyused = .false.
-         do i = 1,is1
-            if (int50 .eq. p(i)) alreadyused = .true.
-         end do
-         if (.not. alreadyused) then
-            is1 = is1 + 1
-            p(is1) = int50
-         end if
-      end do
-
-      is2 = 0
-      do i = 1,n
-         alreadyused = .false.
-         do j = 1,is1
-            if (i .eq. p(j)) alreadyused = .true.
-         end do
-         if (.not. alreadyused) then
-            is2 = is2 +1
-            p(is2+n2) = i
-         end if
-      end do
-
-      return
-      end
-
-      subroutine tvalue(t,g1,g2,n)
-      implicit none
-      integer n,i
-      double precision g1(n),g2(n),rn,t
-      double precision sumg1,sumg2
-      double precision sumg1_2,sumg2_2
-      double precision g1a,g2a,g1ss,g2ss
-      double precision sst
-
-      rn = 1.d0/dble(n)
-      sumg1 = 0.d0
-      sumg2 = 0.d0
-      sumg1_2 = 0.d0
-      sumg2_2 = 0.d0
-      do i = 1,n
-         sumg1 = sumg1 + g1(i)
-         sumg1_2 = sumg1_2 + g1(i)**2
-         sumg2 = sumg2 + g2(i)
-         sumg2_2 = sumg2_2 + g2(i)**2
-      end do
-      g1a = rn*sumg1
-      g2a = rn*sumg2
-      g1ss = sumg1_2 - rn*(sumg1**2)
-      g2ss = sumg2_2 - rn*(sumg2**2)
-      sst = (g1ss + g2ss)/dble(2*n-2)
-      t = (g1a - g2a)/dsqrt(sst*2.d0*rn)
-      t = g1a - g2a
-
-      return
-      end
-
-      subroutine combin(n,m,nchoosem,comb)
-      implicit none
-      integer n,m
-      integer nchoosem,ij,nit,istart,ik(m)
-      integer comb(nchoosem,m)            
-      external combinations
-
-      ij = 0
-      nit = 1
-      istart = 1
-c123456789012345678901234567890123456789012345678901234567890123456789012
-      call combinations(istart,ij,ik,n,m,nit,nchoosem,comb,combinations)
-
-      end
-
-      subroutine combinations(istart,ij,ik,n,m,nit,nchoosem,comb,dsub)
-      implicit none
-      integer i,k,n,m,ij,nchoosem,nit,istart
-      integer comb(nchoosem,m),ik(m)
-      external dsub
-
-c      print*,'nit = ',nit,istart,n
-      do i = istart,n-m+nit
-c         print*,'i = ',i
-         if (nit .le. m-1) then
-            ik(nit) = i
-c            print*,'ik(',nit,') = ',ik(nit)
-            nit = nit + 1      
-            call dsub(i+1,ij,ik,n,m,nit,nchoosem,comb,dsub)
-c            call dsub(1,ij,ik,n,m,nit,nchoosem,comb,dsub)            
-         else
-            ij = ij + 1
-            ik(nit) = i
-c            print*,'ik inside(',nit,') = ',ik(nit)
-            do k = 1,m
-               comb(ij,k) = ik(k)
-c               print*,'comb(',ij,k,') = ',ik(k)
-            end do
-         end if
-      end do
-
-      nit = nit - 1
-
-      end
-
-      function fact(n)
-      implicit none
-      integer fact,n,i
-      fact = 1
-      do i = 2,n
-         fact = fact*i
-c         print*,'fact = ',fact
-      end do
-      end
-
-      subroutine multiple(x,y,sol,yhat,r2,n,k)
-      implicit none
-      integer n,k,i,j,p
-      double precision x(n,k),xmean(k)
-      double precision y(n),ymean,yhat(n)
-      double precision xa(n,k),xat(k,n)
-      double precision xtx(k,k),rhs(k),sol(k)
-      double precision sumx
-      double precision r2,r2top,r2bot,rn
-
-      rn = 1.d0/dble(n)
-      
-      ymean = 0.d0
-      do i = 1,n
-         ymean = ymean + y(i)
-      end do
-      ymean = ymean/dble(n)
-      
-      do j = 1,k
-         sumx = 0.d0
-         do i = 1,n
-            sumx = sumx + x(i,j)
-         end do
-         xmean(j) = sumx/dble(n)
-      end do
-
-c      sumy = 0.d0
-c      sumxx = 0.d0
-c      sumxy = 0.d0
-c      do i = 1,n
-c         sumxy = sumxy + x(i,1)*y(i)
-c         sumxx = sumxx + x(i,1)*x(i,1)
-c         sumy = sumy + y(i)
-c      end do
-
-c      slope = sumxy - sumx*sumy/dble(n)
-c      slope = slope/(sumxx - sumx*sumx/dble(n))
-c      print*,'slope = ',slope
-      
-      do j = 1,k
-         do i = 1,n
-            xa(i,j) = x(i,j) - xmean(j)
-         end do
-      end do
-
-
-      do j = 1,k
-         do i = 1,n
-            xat(j,i) = xa(i,j)
-         end do
-      end do
-
-      do j = 1,k
-         do p = 1,k
-            sumx = 0.d0
-            do i = 1,n
-               sumx = sumx + xat(j,i)*xa(i,p)
-            end do
-            xtx(j,p) = sumx
-         end do
-      end do
-
-      do j = 1,k
-         sumx = 0.d0
-         do i = 1,n
-            sumx = sumx + xat(j,i)*(y(i) - ymean)
-         end do
-         rhs(j) = sumx
-      end do
-
-      call gauss_2(xtx,rhs,sol,k)
-
-c      do p = 1,k
-c         print*,'sol(',k,') = ',sol(k),rhs(k),xtx(k,k),rhs(k)/xtx(k,k)
-c      end do
-c      stop
-      
-      do i = 1,n
-         yhat(i) = 0.d0
-         do j = 1,k
-            yhat(i) = yhat(i) + sol(j)*(x(i,j) - xmean(j))
-         end do
-         yhat(i) = yhat(i) + ymean
-      end do
-
-      r2top = 0.d0
-      r2bot = 0.d0
-      do i = 1,n
-         r2top = r2top + (yhat(i) - ymean)**2
-         r2bot = r2bot + (y(i) - ymean)**2
-      end do
-      r2 = r2top/r2bot
-
-c      print*,'r2 = ',r2
-
-c      x2 = 0.0
-c      y2 = 0.0
-c      z2 = 0.0
-c      xy = 0.0
-c      xz = 0.0
-c      yz = 0.0
-c      xmean(1) = 0.d0
-c      xmean(2) = 0.d0
-c      ymean = 0.d0
-
-c      do i = 1,n
-c         xmean(1) = xmean(1) + x(i,1)
-c         xmean(2) = xmean(2) + x(i,2)
-c         ymean = ymean + y(i)
-c         x2 = x2 + x(i,1)**2
-c         y2 = y2 + x(i,2)**2
-c         z2 = z2 + y(i)**2
-c         xy = xy + x(i,1)*x(i,2)
-c         xz = xz + x(i,1)*y(i)
-c         yz = yz + x(i,2)*y(i)
-c      end do
-
-c      rxy = (xy - xmean(1)*xmean(2)*rn)/
-c     &      dsqrt((x2 - rn*xmean(1)**2)*(y2 - rn*xmean(2)**2))
-c      rxz = (xz - xmean(1)*ymean*rn)/
-c     &      dsqrt((x2 - rn*xmean(1)**2)*(z2 - rn*ymean**2))
-c      ryz = (yz - xmean(2)*ymean*rn)/
-c     &      dsqrt((y2 - rn*xmean(2)**2)*(z2 - rn*ymean**2))
-c
-c      r2 = (rxz**2 - 2.d0*rxy*ryz*rxz + ryz**2)/(1.d0 - rxy**2)
-c
-c      print*,'r2 = ',r2
-      
-      end
-
-      subroutine gauss_2(a,b,x,n)
-!===========================================================
-! Solutions to a system of linear equations A*x=b
-! Method: Gauss elimination (with scaling and pivoting)
-! Alex G. (November 2009)
-!-----------------------------------------------------------
-! input ...
-! a(n,n) - array of coefficients for matrix A
-! b(n)   - array of the right hand coefficients b
-! n      - number of equations (size of matrix A)
-! output ...
-! x(n)   - solutions
-! coments ...
-! the original arrays a(n,n) and b(n) will be destroyed 
-! during the calculation
-!===========================================================
-       implicit none 
-       integer n
-       double precision a(n,n), b(n), x(n)
-       double precision s(n)
-       double precision c, pivot, store
-       integer i, j, k, l
-
-c step 1: begin forward elimination
-       do k=1, n-1
-
-c step 2: "scaling"
-c s(i) will have the largest element from row i 
-          do i= k,n                       ! loop over rows
-             s(i) = 0.0
-             do j= k,n                    ! loop over elements of row i
-                s(i) = max(s(i),abs(a(i,j)))
-             end do
-          end do
-
-! step 3: "pivoting 1" 
-! find a row with the largest pivoting element
-          pivot = abs(a(k,k)/s(k))
-          l = k
-          do j=k+1,n
-             if (abs(a(j,k)/s(j)) > pivot) then
-                pivot = abs(a(j,k)/s(j))
-                l = j
-             end if
-          end do
-
-c         Check if the system has a sigular matrix
-          if (pivot == 0.0) then
-             write(*,*) ' The matrix is sigular '
-             return
-          end if
-
-! step 4: "pivoting 2" interchange rows k and l (if needed)
-          if (l /= k) then
-             do j=k,n
-                store = a(k,j)
-                a(k,j) = a(l,j)
-                a(l,j) = store
-             end do
-             store = b(k)
-             b(k) = b(l)
-             b(l) = store
-          end if
-
-! step 5: the elimination (after scaling and pivoting)
-          do i=k+1,n
-             c=a(i,k)/a(k,k)
-             a(i,k) = 0.0
-             b(i)=b(i)- c*b(k)
-             do j=k+1,n
-                a(i,j) = a(i,j)-c*a(k,j)
-             end do
-          end do
-       end do
-
-! step 6: back substiturion 
-       x(n) = b(n)/a(n,n)
-       do i=n-1,1,-1
-          c=0.0
-          do j=i+1,n
-             c= c + a(i,j)*x(j)
-          end do 
-          x(i) = (b(i)- c)/a(i,i)
-       end do
-
-      end subroutine gauss_2 
-
 
       SUBROUTINE GAMMA(X,GA)
 
@@ -2376,252 +1417,68 @@ c         Check if the system has a sigular matrix
               IF (X.LT.0.0D0) GA=-PI/(X*GA*DSIN(PI*X))
            ENDIF
         ENDIF
-        RETURN
-        END
-      
-
-        double precision function bimodal(x)
-        implicit none
-        double precision x
-        double precision sigma1,mu1
-        double precision sigma2,mu2
-        double precision pi
-        double precision aa1,aa2
-        double precision bi1,bi2
-
-        pi = acos(-1.d0)
-        
-        mu1 = -1d0
-        sigma1 = 0.5d0
-
-        mu2 = 1.d0
-        sigma2 = 0.5d0
-        
-        aa1 = (x - mu1)/sigma1
-        aa2 = (x - mu2)/sigma2
-        
-        bi1 = exp(-.5d0*aa1**2)/(sigma1*sqrt(2.d0*pi))
-        bi2 = exp(-.5d0*aa2**2)/(sigma2*sqrt(2.d0*pi))        
-        
-        bimodal = 0.5d0*(bi1 + bi2)
-c        bimodal = bi1
-        
-        return
-        end
-
-        subroutine cumbinomial(x,xx)
-        implicit none
-        integer n,i
-        double precision aa,bb,dx,summ,a,b
-        double precision x,xx,bimodal,eps 
-
-        n = 1000
-        aa = -8.d0
-        bb = 8.d0
-        dx = (bb - aa)/dble(n)
-        summ = 0.d0
-        i = 1
-        xx = aa
-        eps = 1.d-12
-
-        do while (summ .lt. x-eps)
-           a = aa + dble(i-1)*dx
-           b = aa + dble(i)*dx
-           summ = summ + .5d0*(bimodal(a)+bimodal(b))*dx
-           xx = .5d0*(a+b)
-           i = i + 1
-        end do
-
-        return
-        end
-
-      
-c      subroutine ks
-c      integer status
-c      double precision pnor,qnor,xmm,meannor
-c      double precision sdnor,boundnor,stz,meanz
-c      double precision d,prob
-c      double precision, allocatable :: data(:)
-c
-c      
-c      meanz = 0.d0
-c      stz = 1.d0
-c     
-c      meannor = 0.d0
-c      sdnor = 1.d0
-c
-c      n = 10000
-c      allocate(data(n))
-c
-c      do i =  1,n
-c         pnor = min(max(rand(),eps),1.d0-eps)
-c         qnor = 1.d0 - pnor
-c
-c         call cdfnor(2,pnor,qnor,xmm,meanz,stz,
-c     &               status,boundnor)
-c      
-c         xm = sdnor*xmm + meannor
-c         data(i) = xm
-c      end do
-c
-c      call ksone(data,n,d,prob)
-c      print*,'d prob = ',d,prob
-c      
-c      end
-
-      SUBROUTINE ksone(data,n,d,prob,zavg,sigmaz)
-      implicit none
-      integer n
-      double precision d,data(n),func,prob
-      double precision zavg,sigmaz
-      external func
-c USES probks,sort
-c Given an array data(1:n), and given a user-supplied function of a single variable func
-c which is a cumulative distribution function ranging from 0 (for smallest values of its argument) to 1
-c (for largest values of its argument), this routine returns the K–S statistic d, and
-c the significance level prob. Small values of prob show that the cumulative distribution
-c function of data is significantly different from func. The array data is modified by being
-c sorted into ascending order.
-
-      integer j
-      double precision dt,en,ff,fn,fo,probks
-      call sort(n,data) ! If the data are already sorted into ascending oren=n der, then this call can be omitted.
-c      do j = 1,n
-c         print*,'data(',j,') = ',data(j)
-c      end do
-      en=n
-      d=0.
-      fo=0. ! Data’s c.d.f. before the next step.
-      do j=1,n ! Loop over the sorted data points.
-           fn=j/en                ! Data’s c.d.f. after this step.
-           ff=func(data(j),zavg,sigmaz)     ! Compare to the user-supplied function.
-           dt=max(abs(fo-ff),abs(fn-ff)) ! Maximum distance.
-           if (dt.gt.d) d=dt
-           fo=fn
-      end do 
-      en=sqrt(en)
-c      print*,(en+0.12d0+0.11d0/en),d,(en+0.12d0+0.11d0/en)*d
-      prob=probks((en+0.12d0+0.11d0/en)*d) ! Compute significance.
-      return
+      RETURN
       END
-
-
       
-      function probks(alam)
+
+      subroutine cumbinomial(x,xx)
+c     Computes the cumulative bimodal distribution      
       implicit none
-      double precision probks,alam,EPS1,EPS2
-      parameter (EPS1=0.001d0, EPS2=1.d-8)
-c     Kolmogorov-Smirnov probability function.
-      integer j
-      double precision a2,fac,term,termbf
-      a2=-2.d0*alam**2
-      fac=2.d0
-      probks=0.d0
-      termbf=0.d0 ! Previous term in sum.
-      do j=1,100
-         term=fac*exp(a2*j**2)
-         probks=probks+term
-         if(abs(term).le.EPS1*termbf.or.abs(term).le.EPS2*probks) return
-         fac=-fac ! Alternating signs in sum.
-         termbf=abs(term)
-      end do 
-      probks=1.d0 ! Get here only by failing to converge.
+      integer n,i
+      double precision aa,bb,dx,summ,a,b
+      double precision x,xx,bimodal,eps 
+
+      n = 1000
+      aa = -8.d0
+      bb = 8.d0
+      dx = (bb - aa)/dble(n)
+      summ = 0.d0
+      i = 1
+      xx = aa
+      eps = 1.d-12
+
+      do while (summ .lt. x-eps)
+         a = aa + dble(i-1)*dx
+         b = aa + dble(i)*dx
+         summ = summ + .5d0*(bimodal(a)+bimodal(b))*dx
+         xx = .5d0*(a+b)
+         i = i + 1
+      end do
+
       return
       end
 
-      function func(rr,zavg,sigmaz)
+      double precision function bimodal(x)
+c     Computes a bimodal normal distribution      
       implicit none
-      double precision func,result,rr,ccum
-      double precision zavg,sigmaz,zz
-      zz = (rr - zavg)/sigmaz
-      call cumnor(zz,result,ccum)
-      func = result
-      end 
-      
-      subroutine sort(n,arr)
-      implicit none
-      integer n,M,NSTACK
-      double precision arr(n)
-      parameter (M=7,NSTACK=50)
-c     Sorts an array arr(1:n) into ascending numerical order using the Quicksort algorithm.
-c     n is input; arr is replaced on output by its sorted rearrangement.
-c     Parameters: M is the size of subarrays sorted by straight insertion and NSTACK is the required
-c     auxiliary storage.
-      integer i,ir,j,jstack,k,l,istack(NSTACK)
-      double precision a,temp
-      jstack=0
-      l=1
-      ir=n
- 1    if (ir-l.lt.M) then
-c       Insertion sort when subarray small enough.
-        do j=l+1,ir
-          a=arr(j)
-          do i=j-1,l,-1
-            if (arr(i).le.a) goto 2
-              arr(i+1)=arr(i)
-          end do 
-          i=l-1
- 2        arr(i+1)=a
-        end do 
+      double precision x
+      double precision sigma1,mu1
+      double precision sigma2,mu2
+      double precision pi
+      double precision aa1,aa2
+      double precision bi1,bi2
 
-        if (jstack.eq.0) return
-        ir=istack(jstack) ! Pop stack and begin a new round of partitioning.
-        l=istack(jstack-1)
-        jstack=jstack-2
-      else
-        k=(l+ir)/2 
-        temp=arr(k)
-        arr(k)=arr(l+1)
-        arr(l+1)=temp
-        if (arr(l).gt.arr(ir)) then
-          temp=arr(l)
-          arr(l)=arr(ir)
-          arr(ir)=temp
-        end if
-        if (arr(l+1).gt.arr(ir)) then
-          temp=arr(l+1)
-          arr(l+1)=arr(ir)
-          arr(ir)=temp
-        end if
-        if (arr(l).gt.arr(l+1)) then
-          temp=arr(l)
-          arr(l)=arr(l+1)
-          arr(l+1)=temp
-        end if
-        i=l+1 ! Initialize pointers for partitioning.
-        j=ir
-        a=arr(l+1) ! Partitioning element.
- 3      continue ! Beginning of innermost loop.
-           i=i+1 ! Scan up to find element > a.
-        if (arr(i) .lt. a) goto 3
- 4      continue
-           j=j-1 ! Scan down to find element < a.
-        if (arr(j).gt.a) goto 4
-        if (j.lt.i) goto 5 ! Pointers crossed. Exit with partitioning complete.
-        temp=arr(i) ! Exchange elements.
-        arr(i) = arr(j)
-        arr(j) = temp
-        goto 3 ! End of innermost loop.
- 5      arr(l+1)=arr(j) ! Insert partitioning element.
-        arr(j)=a
-        jstack=jstack+2
-c        Push pointers to larger subarray on stack, process smaller subarray immediately.
-        if (jstack.gt.NSTACK) then
-           print*,"NSTACK too small in sort"
-           stop
-        end if
-        if (ir-i+1.ge.j-l)then
-          istack(jstack)=ir
-          istack(jstack-1)=i
-          ir=j-1
-        else
-          istack(jstack)=j-1
-          istack(jstack-1)=l
-          l=i
-        end if
-      end if
-      goto 1
+      pi = acos(-1.d0)
+        
+      mu1 = -1d0
+      sigma1 = 0.5d0
+
+      mu2 = 1.d0
+      sigma2 = 0.5d0
+        
+      aa1 = (x - mu1)/sigma1
+      aa2 = (x - mu2)/sigma2
+        
+      bi1 = exp(-.5d0*aa1**2)/(sigma1*sqrt(2.d0*pi))
+      bi2 = exp(-.5d0*aa2**2)/(sigma2*sqrt(2.d0*pi))        
+        
+      bimodal = 0.5d0*(bi1 + bi2)
+        
+      return
       end
+
+
+      
 
       SUBROUTINE cdfnor(which,p,q,x,mean,sd,status,bound)
 C**********************************************************************
