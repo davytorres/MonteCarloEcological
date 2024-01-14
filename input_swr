@@ -1,6 +1,6 @@
 n 10000
 np 2
-nk 1000000
+nk 100000
 rho .7d0
 rminz .3
 rmaxz 1.0d0

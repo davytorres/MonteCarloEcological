@@ -3,7 +3,7 @@
 ! without replacement from a finite population
 program correlation
  implicit none
- include 'mpif.h'
+! include 'mpif.h'
 
 ! Input variables
  character*4 strz       
@@ -35,7 +35,7 @@ program correlation
       
  integer ijk,i,iii,jjj,ii,nitr,iijj
  integer j,itimes,irs,ija
- integer ij,jj,iiata,itimesnum
+ integer ij,jj,iiata !,itimesnum
  integer iiat,jjk,jjk_save
  
 ! Variables used to determine if sample is unique 
@@ -66,11 +66,10 @@ program correlation
 ! Variables for normal and slope simulated distribution 
  double precision sminz,smaxz,sminzb,smaxzb 
 
-! Parallel arrays and variables
- integer status
- integer num_processors,image,ierror
- double precision amax(4),amin(4)
- double precision a(4),aa(8),asum(8)
+!! Parallel arrays and variables
+! integer num_processors,image,ierror
+! double precision amax(4),amin(4)
+! double precision a(4),aa(8),asum(8)
 
 ! Maximum iterations to achieve R_{individual} = rho
  integer nitdiff
@@ -92,7 +91,7 @@ program correlation
  double precision varr,varz,var_slope
 
  ! Variable used to compute sampling distribution statistics
- integer nnn,imultiple
+ integer nnn,imultiple,status
  double precision rn     
  double precision ravg,zavg,slopeavg 
  double precision rpairsum2,zpairsum2,slopeavg2
@@ -121,23 +120,23 @@ program correlation
 
 !*********************************************************************      
 ! Arrays that are written to files      
- double precision, allocatable :: pearsonr(:)
- double precision, allocatable :: pearsonr_max(:)
- double precision, allocatable :: pearsonr_min(:)
- double precision, allocatable :: pearsonr_var(:)
- double precision, allocatable :: pearsonr_var_min(:)
- double precision, allocatable :: pearsonr_var_max(:)
+ double precision, allocatable :: pearsonr(:)[:]
+ double precision, allocatable :: pearsonr_max(:)[:]
+ double precision, allocatable :: pearsonr_min(:)[:]
+ double precision, allocatable :: pearsonr_var(:)[:]
+ double precision, allocatable :: pearsonr_var_min(:)[:]
+ double precision, allocatable :: pearsonr_var_max(:)[:]
      
- double precision, allocatable :: least_squares_slope(:)
- double precision, allocatable :: least_squares_slope_max(:)
- double precision, allocatable :: least_squares_slope_min(:)
- double precision, allocatable :: least_squares_slope_var(:)      
- double precision, allocatable :: least_squares_slope_var_max(:)
- double precision, allocatable :: least_squares_slope_var_min(:)            
- double precision, allocatable :: areab_array(:)
+ double precision, allocatable :: least_squares_slope(:)[:]
+ double precision, allocatable :: least_squares_slope_max(:)[:]
+ double precision, allocatable :: least_squares_slope_min(:)[:]
+ double precision, allocatable :: least_squares_slope_var(:)[:]      
+ double precision, allocatable :: least_squares_slope_var_max(:)[:]
+ double precision, allocatable :: least_squares_slope_var_min(:)[:]            
+ double precision, allocatable :: areab_array(:)[:]
 
- double precision, allocatable :: fisherz(:),fisherz_var(:)
- double precision, allocatable :: fisherz_area(:)
+ double precision, allocatable :: fisherz(:)[:],fisherz_var(:)[:]
+ double precision, allocatable :: fisherz_area(:)[:]
 !*********************************************************************      
 ! Arrays to determine if sample is unique         
  double precision, allocatable :: arrayr(:)
@@ -163,13 +162,13 @@ program correlation
 
  double precision, allocatable :: rsave(:),sdnorx(:),sdnory(:)
       
- call MPI_INIT(ierror)
- call MPI_COMM_SIZE(MPI_COMM_WORLD, num_processors, ierror)
- call MPI_COMM_RANK(MPI_COMM_WORLD, image, ierror)
+! call MPI_INIT(ierror)
+! call MPI_COMM_SIZE(MPI_COMM_WORLD, num_processors, ierror)
+! call MPI_COMM_RANK(MPI_COMM_WORLD, image, ierror)
 
  open(unit=9,file="input_swr")
 ! Output files that generated
- if (image .eq. 0) then
+ if (this_image() .eq. 1) then
     open(unit=85,file="pearsonr")
     open(unit=86,file="slope")
     open(unit=87,file="fisher")
@@ -179,7 +178,6 @@ program correlation
     open(unit=99,file="sdistanalytical")
  end if
 
- print*,'image = ',image
 ! n: length of original scores
 ! np: size of the group
 ! nnn : sample size - now calculated
@@ -197,16 +195,19 @@ program correlation
 
 ! Currently 112 populations are used
  num_populations = 112
- itimes = num_populations/num_processors
+! itimes = num_populations/num_processors
+ itimes = num_populations/num_images()
 
+ print*,'image = ',this_image(),' out of ',num_images()
+ 
  create_distribution = .false.
- !create_distribution = .true. 
+! create_distribution = .true. 
  if (create_distribution) then
     mp = 1
     itimes = 1
  end if
 
- itimesnum = itimes*num_processors
+! itimesnum = itimes*num_processors
       
  nonreplacement = .true.
 
@@ -215,7 +216,7 @@ program correlation
 
  eps = 1.d-14
 
- if (image .eq. 0) then
+ if (this_image() .eq. 1) then
     print*,'n = ',n,'np = ',np,'nk = ',nk, &
     'rho = ',rho,'rmin = ',rminz,'rmax = ',rmaxz,'mp = ',mp
  end if
@@ -230,23 +231,24 @@ program correlation
 
  allocate(npa(mp))
 
- allocate(pearsonr(mp))
- allocate(pearsonr_max(mp))
- allocate(pearsonr_min(mp))
- allocate(pearsonr_var(mp))      
- allocate(pearsonr_var_max(mp))      
- allocate(pearsonr_var_min(mp))      
+ allocate(pearsonr(mp)[*])
+ allocate(pearsonr_max(mp)[*])
+ allocate(pearsonr_min(mp)[*])
+ allocate(pearsonr_var(mp)[*])      
+ allocate(pearsonr_var_max(mp)[*])      
+ allocate(pearsonr_var_min(mp)[*])      
       
- allocate(least_squares_slope(mp))
- allocate(least_squares_slope_max(mp))
- allocate(least_squares_slope_min(mp))
- allocate(least_squares_slope_var(mp))
- allocate(least_squares_slope_var_max(mp))
- allocate(least_squares_slope_var_min(mp))            
- allocate(areab_array(mp))
+ allocate(least_squares_slope(mp)[*])
+ allocate(least_squares_slope_max(mp)[*])
+ allocate(least_squares_slope_min(mp)[*])
+ allocate(least_squares_slope_var(mp)[*])
+ allocate(least_squares_slope_var_max(mp)[*])
+ allocate(least_squares_slope_var_min(mp)[*])            
+ allocate(areab_array(mp)[*])
       
- allocate(fisherz(mp),fisherz_var(mp))      
- allocate(fisherz_area(mp))
+ allocate(fisherz(mp)[*])
+ allocate(fisherz_var(mp)[*])      
+ allocate(fisherz_area(mp)[*])
  
  allocate(xm(n),ym(n))
  allocate(xma(n,itimes),yma(n,itimes))
@@ -263,7 +265,7 @@ program correlation
 
 ! These lines are executed so each image selects different populations      
  sumrr = 0.d0
- do ii = 1,image+20
+ do ii = 1,this_image()+20
     rr = rand()
  end do
  if (sumrr > 200.d0) then
@@ -362,7 +364,7 @@ program correlation
 !    nnn is the sample size         
      nnn = npa(iijj)
 
-     if (image .eq. 0) then
+     if (this_image() .eq. 1) then
         print*,'iijj = ',iijj,npa(iijj),n
      end if
          
@@ -740,85 +742,107 @@ program correlation
      fisherz_var(iijj) = fisherz_var(iijj)/dble(itimes)
      fisherz_area(iijj) = fisherz_area(iijj)/dble(itimes)
             
-     aa(1) = pearsonr(iijj)         
-     aa(2) = pearsonr_var(iijj)
-     aa(3) = least_squares_slope(iijj)
-     aa(4) = least_squares_slope_var(iijj)
-     aa(5) = areab_array(iijj)                  
-     aa(6) = fisherz(iijj)
-     aa(7) = fisherz_var(iijj)
-     aa(8) = fisherz_area(iijj)
+!     aa(1) = pearsonr(iijj)         
+!     aa(2) = pearsonr_var(iijj)
+!     aa(3) = least_squares_slope(iijj)
+!     aa(4) = least_squares_slope_var(iijj)
+!     aa(5) = areab_array(iijj)                  
+!     aa(6) = fisherz(iijj)
+!     aa(7) = fisherz_var(iijj)
+!     aa(8) = fisherz_area(iijj)
 
+!     call MPI_REDUCE(aa,asum,8,MPI_DOUBLE_PRECISION,MPI_SUM,0,MPI_COMM_WORLD,ierror)
 
-     call MPI_REDUCE(aa,asum,8,MPI_DOUBLE_PRECISION,MPI_SUM,0,MPI_COMM_WORLD,ierror)
+!     a(1) = pearsonr_max(iijj)         
+!     a(2) = pearsonr_var_max(iijj)
+!     a(3) = least_squares_slope_max(iijj)
+!     a(4) = least_squares_slope_var_max(iijj)
 
-     a(1) = pearsonr_max(iijj)         
-     a(2) = pearsonr_var_max(iijj)
-     a(3) = least_squares_slope_max(iijj)
-     a(4) = least_squares_slope_var_max(iijj)
+!     call MPI_REDUCE(a,amax,4,MPI_DOUBLE_PRECISION,MPI_MAX,0,MPI_COMM_WORLD,ierror)
 
-     call MPI_REDUCE(a,amax,4,MPI_DOUBLE_PRECISION,MPI_MAX,0,MPI_COMM_WORLD,ierror)
+!     a(1) = pearsonr_min(iijj)         
+!     a(2) = pearsonr_var_min(iijj)
+!     a(3) = least_squares_slope_min(iijj)
+!     a(4) = least_squares_slope_var_min(iijj)
 
-     a(1) = pearsonr_min(iijj)         
-     a(2) = pearsonr_var_min(iijj)
-     a(3) = least_squares_slope_min(iijj)
-     a(4) = least_squares_slope_var_min(iijj)
+!     call MPI_REDUCE(a,amin,4,MPI_DOUBLE_PRECISION,MPI_MIN,0,MPI_COMM_WORLD,ierror)         
 
-     call MPI_REDUCE(a,amin,4,MPI_DOUBLE_PRECISION,MPI_MIN,0,MPI_COMM_WORLD,ierror)         
-
-     if (image .eq. 0) then
-         
-        do i = 1,8
-           asum(i) = asum(i)/dble(num_processors)
-        end do
-
-        pearsonr(iijj) = asum(1)
-        pearsonr_var(iijj) = asum(2)
-        least_squares_slope(iijj) = asum(3)
-        least_squares_slope_var(iijj) = asum(4)
-        areab_array(iijj) = asum(5)            
-        fisherz(iijj) = asum(6)
-        fisherz_var(iijj) = asum(7)
-        fisherz_area(iijj) = asum(8)
-            
-        pearsonr_max(iijj) = amax(1)
-        pearsonr_var_max(iijj) = amax(2)
-        least_squares_slope_max(iijj) = amax(3)            
-        least_squares_slope_var_max(iijj) = amax(4)
-
-        pearsonr_min(iijj) = amin(1)
-        pearsonr_var_min(iijj) = amin(2)
-        least_squares_slope_min(iijj) = amin(3)            
-        least_squares_slope_var_min(iijj) = amin(4)
-            
-     end if
+!     if (image .eq. 0) then
+!         
+!        do i = 1,8
+!           asum(i) = asum(i)/dble(num_processors)
+!        end do
+!
+!        pearsonr(iijj) = asum(1)
+!        pearsonr_var(iijj) = asum(2)
+!        least_squares_slope(iijj) = asum(3)
+!        least_squares_slope_var(iijj) = asum(4)
+!        areab_array(iijj) = asum(5)            
+!        fisherz(iijj) = asum(6)
+!        fisherz_var(iijj) = asum(7)
+!        fisherz_area(iijj) = asum(8)
+!            
+!        pearsonr_max(iijj) = amax(1)
+!        pearsonr_var_max(iijj) = amax(2)
+!        least_squares_slope_max(iijj) = amax(3)            
+!        least_squares_slope_var_max(iijj) = amax(4)
+!
+!        pearsonr_min(iijj) = amin(1)
+!        pearsonr_var_min(iijj) = amin(2)
+!        least_squares_slope_min(iijj) = amin(3)            
+!        least_squares_slope_var_min(iijj) = amin(4)
+!            
+!     end if
 
      deallocate(xavg,yavg)
       
   end do ! mp loop
+
+  sync all
+  call co_sum(pearsonr,result_image=1)
+  call co_sum(pearsonr_var,result_image=1)
+  call co_sum(least_squares_slope,result_image=1)
+  call co_sum(least_squares_slope_var,result_image=1)
+  call co_sum(areab_array,result_image=1)
+  call co_sum(fisherz,result_image=1)
+  call co_sum(fisherz_var,result_image=1)
+  call co_sum(fisherz_area,result_image=1)
+
+  call co_max(pearsonr_max,result_image=1)
+  call co_max(pearsonr_var_max,result_image=1)
+  call co_max(least_squares_slope_max,result_image=1)
+  call co_max(least_squares_slope_var_max,result_image=1)
+
+  call co_min(pearsonr_min,result_image=1)
+  call co_min(pearsonr_var_min,result_image=1)
+  call co_min(least_squares_slope_min,result_image=1)
+  call co_min(least_squares_slope_var_min,result_image=1)     
+     
+
+
   
-  if (image .eq. 0) then
+  if (this_image() .eq. 1) then
      
      do iijj = 1,mp
         write(85,*) dble(npa(iijj)/dble(n)), &
-                    pearsonr(iijj), &
+                    pearsonr(iijj)/num_images(), &
                     pearsonr_max(iijj), &
                     pearsonr_min(iijj), &
-                    pearsonr_var(iijj), &
+                    pearsonr_var(iijj)/num_images(), &
                     pearsonr_var_max(iijj), &
                     pearsonr_var_min(iijj)
         write(86,*) dble(npa(iijj)/dble(n)), &
-                    least_squares_slope(iijj), &
+                    least_squares_slope(iijj)/num_images(), &
                     least_squares_slope_max(iijj), &
                     least_squares_slope_min(iijj), &
-                    least_squares_slope_var(iijj), &
+                    least_squares_slope_var(iijj)/num_images(), &
                     least_squares_slope_var_max(iijj), &
                     least_squares_slope_var_min(iijj), &
-                    areab_array(iijj)
+                    areab_array(iijj)/num_images()
         write(87,*) dble(npa(iijj)/dble(n)), &
-                    fisherz(iijj), &
-                    fisherz_var(iijj), &
-                    fisherz_area(iijj)
+                    fisherz(iijj)/num_images(), &
+                    fisherz_var(iijj)/num_images(), &
+                    fisherz_area(iijj)/num_images()
      end do   
             
 
@@ -946,6 +970,6 @@ program correlation
       
   end if
 
-  call MPI_FINALIZE(ierror)         
+!  call MPI_FINALIZE(ierror)         
 
 end
